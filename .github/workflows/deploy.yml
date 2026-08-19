@@ -1,0 +1,43 @@
+name: Deploy SonarQube
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Start ssh agent
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.AZURE_VM_SSH_KEY }}
+
+      - name: Add host key
+        env:
+          VM_HOST: ${{ secrets.AZURE_VM_HOST }}
+          VM_PORT: ${{ secrets.AZURE_VM_PORT }}
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -H -p "${VM_PORT:-22}" "${VM_HOST}" >> ~/.ssh/known_hosts
+
+      - name: Deploy SonarQube config
+        env:
+          VM_USER: ${{ secrets.AZURE_VM_USER }}
+          VM_HOST: ${{ secrets.AZURE_VM_HOST }}
+          VM_PORT: ${{ secrets.AZURE_VM_PORT }}
+        run: |
+          # Ship the compose file, install it, and apply it.
+          scp -P "${VM_PORT:-22}" docker-compose.yml "${VM_USER}@${VM_HOST}:/tmp/sonarqube-compose.yml"
+          ssh -p "${VM_PORT:-22}" "${VM_USER}@${VM_HOST}" <<'EOF'
+            set -euo pipefail
+            sudo install -m 644 /tmp/sonarqube-compose.yml /opt/apps/sonarqube/docker-compose.yml
+            cd /opt/apps/sonarqube
+            docker compose up -d --pull=missing
+            docker compose ps
+            EOF
